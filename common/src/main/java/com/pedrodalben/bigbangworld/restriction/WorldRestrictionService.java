@@ -1,0 +1,48 @@
+package com.pedrodalben.bigbangworld.restriction;
+
+import com.pedrodalben.bigbangworld.api.BigBangWorldApi;
+import com.pedrodalben.bigbangworld.api.WorldPolicyApi;
+import com.pedrodalben.bigbangworld.config.ConfigManager;
+import com.pedrodalben.bigbangworld.util.TranslationUtil;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.state.BlockState;
+
+public class WorldRestrictionService {
+
+    public static boolean isPlacementBlocked(ServerPlayer player, BlockState state, ServerLevel level) {
+        if (player == null || state == null || level == null) {
+            return false;
+        }
+
+        WorldPolicyApi api = BigBangWorldApi.get();
+        if (api == null) {
+            return false;
+        }
+
+        if (!api.isTemporaryWorld(level)) {
+            return false;
+        }
+
+        if (api.isWaystonePlacementAllowed(player, state)) {
+            return false;
+        }
+
+        ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        String blockIdStr = blockId.toString();
+        String namespace = blockId.getNamespace();
+
+        var config = ConfigManager.getConfig();
+        boolean blockRestricted = config.getRestrictedPlacementBlocks().contains(blockIdStr);
+        boolean namespaceRestricted = config.getRestrictedPlacementNamespaces().contains(namespace);
+
+        if (blockRestricted || namespaceRestricted) {
+            player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.waystone_placement_blocked"));
+            return true;
+        }
+
+        return false;
+    }
+}
