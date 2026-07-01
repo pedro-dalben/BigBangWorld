@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "bigbangworld",
+  "version": "${version}",
+  "name": "BigBangWorld",
+  "description": "BigBangWorld is a mod that allows managing temporary, resettable extra worlds.",
+  "authors": [
+    "pedrodalben"
+  ],
+  "license": "All Rights Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.pedrodalben.bigbangworld.fabric.FabricModEntrypoint"
+    ]
+  },
+  "mixins": [
+    "bigbangworld.mixins.json",
+    "bigbangworld-fabric.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.9",
+    "minecraft": "1.21.1",
+    "fabric-api": "*"
+  }
+}

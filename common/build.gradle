@@ -1,0 +1,50 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.107'
+}
+
+base {
+    archivesName = "${mod_id}-common"
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+            sourceSet(sourceSets.test)
+        }
+    }
+}
+
+dependencies {
+    // External libraries required for compilation
+    compileOnly 'org.java-websocket:Java-WebSocket:1.5.7'
+    compileOnly 'org.yaml:snakeyaml:2.2'
+    compileOnly 'com.zaxxer:HikariCP:5.1.0'
+    compileOnly 'org.xerial:sqlite-jdbc:3.46.0.0'
+    compileOnly 'com.mysql:mysql-connector-j:9.1.0'
+
+    // APIs
+    compileOnly 'net.luckperms:api:5.4'
+    compileOnly 'curse.maven:ftb-library-404465:7029003'
+    compileOnly 'curse.maven:architectury-api-419699:5786327'
+    compileOnly 'curse.maven:ftb-ranks-314905:6522073'
+
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+    testCompileOnly files(sourceSets.main.compileClasspath)
+    testRuntimeOnly files(sourceSets.main.runtimeClasspath)
+}
+
+test {
+    useJUnitPlatform()
+}

@@ -1,0 +1,49 @@
+plugins {
+    id 'fabric-loom' version '1.9-SNAPSHOT'
+}
+
+base {
+    archivesName = "${mod_id}-fabric"
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    mappings loom.layered() {
+        officialMojangMappings()
+        parchment("org.parchmentmc.data:parchment-${project.parchment_minecraft_version}:${project.parchment_mappings_version}@zip")
+    }
+
+    // Fabric Loader and Fabric API
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+
+    // Depend on common module
+    implementation project(":common")
+
+    // APIs
+    modCompileOnly 'net.luckperms:api:5.4'
+    modCompileOnly 'curse.maven:architectury-api-419699:5786327'
+}
+
+// Copy build_number.txt to resources
+tasks.register("copyBuildNumber", Copy) {
+    from rootProject.file('build_number.txt')
+    into file('src/main/resources')
+}
+
+tasks.named('processResources').configure {
+    dependsOn 'copyBuildNumber'
+    
+    // Expand properties in fabric.mod.json
+    def versionValue = project.version.toString()
+    inputs.property "version", versionValue
+    filesMatching("fabric.mod.json") {
+        expand "version": versionValue
+    }
+}
+
+// Merge common classes and resources into the final Fabric mod jar
+tasks.named('jar', Jar) {
+    from project(":common").sourceSets.main.output
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
