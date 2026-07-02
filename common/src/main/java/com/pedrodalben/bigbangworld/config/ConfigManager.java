@@ -7,12 +7,13 @@ import com.pedrodalben.bigbangworld.util.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -86,13 +87,13 @@ public class ConfigManager {
 
         WorldDefinition def = new WorldDefinition();
         def.setId("exploracao");
-        def.setDisplayName("Mundo de Exploração");
+        def.setDisplayName("Mundo de Exploracao");
         def.setType(WorldType.NORMAL);
         def.setSeed(0L);
         def.setDimensionKey("bigbangworld:exploracao");
-        def.setState(WorldLifecycleState.DISABLED);
+        def.setState(WorldLifecycleState.ACTIVE);
         def.setPublicAccess(true);
-        def.setCreatedAt("");
+        def.setCreatedAt(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
         def.setLastResetAt(null);
         def.setResetCount(0);
 

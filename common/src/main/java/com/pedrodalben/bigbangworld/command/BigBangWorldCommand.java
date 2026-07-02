@@ -28,7 +28,6 @@ import java.util.Collection;
 public class BigBangWorldCommand {
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        // Register /bbworld
         dispatcher.register(Commands.literal("bbworld")
             .requires(src -> src.hasPermission(4) || src.isPlayer())
             .then(Commands.literal("create")
@@ -108,10 +107,7 @@ public class BigBangWorldCommand {
             )
             .then(Commands.literal("delete")
                 .then(Commands.argument("id", StringArgumentType.word())
-                    .executes(ctx -> executeDelete(ctx, StringArgumentType.getString(ctx, "id"), null))
-                    .then(Commands.argument("confirm", StringArgumentType.word())
-                        .executes(ctx -> executeDelete(ctx, StringArgumentType.getString(ctx, "id"), StringArgumentType.getString(ctx, "confirm")))
-                    )
+                    .executes(ctx -> executeDelete(ctx, StringArgumentType.getString(ctx, "id")))
                 )
             )
             .then(Commands.literal("diagnose")
@@ -121,7 +117,6 @@ public class BigBangWorldCommand {
             )
         );
 
-        // Register /explorar
         dispatcher.register(Commands.literal("explorar")
             .requires(src -> src.isPlayer() && PermissionService.hasPermission(src.getPlayer(), "bigbangworld.explore"))
             .executes(BigBangWorldCommand::executeExplore)
@@ -144,11 +139,11 @@ public class BigBangWorldCommand {
         try {
             type = WorldType.valueOf(typeStr.toUpperCase());
         } catch (IllegalArgumentException e) {
-            player.sendSystemMessage(Component.literal("§cTipo de mundo inválido: " + typeStr + ". Escolha entre normal, superflat, void."));
+            player.sendSystemMessage(Component.literal("§cTipo de mundo inv lido: " + typeStr + ". Escolha entre normal, superflat, void."));
             return 0;
         }
 
-        WorldManager.getInstance().createWorld(id, type, seed, player);
+        WorldManager.getInstance().createWorld(player, id, type, seed);
         return 1;
     }
 
@@ -165,10 +160,10 @@ public class BigBangWorldCommand {
         src.sendSuccess(() -> Component.literal("§6=== Mundos BigBangWorld (" + list.size() + ") ==="), false);
         for (WorldDefinition def : list) {
             int count = 0;
-            MinecraftServer server = src.getServer();
+            MinecraftServer srv = src.getServer();
             ResourceLocation resLoc = ResourceLocation.fromNamespaceAndPath("bigbangworld", def.getId());
             ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, resLoc);
-            ServerLevel level = server.getLevel(key);
+            ServerLevel level = srv.getLevel(key);
             if (level != null) {
                 count = level.players().size();
             }
@@ -176,7 +171,7 @@ public class BigBangWorldCommand {
             final int playerCount = count;
             src.sendSuccess(() -> Component.literal(
                 String.format("§eID: §f%s §7| §eNome: §f%s §7| §eTipo: §a%s §7| §eEstado: §b%s §7| §eJogadores: §d%d §7| §eAcesso: §f%s",
-                    def.getId(), def.getDisplayName(), def.getType(), def.getState(), playerCount, def.isPublicAccess() ? "Público" : "Privado")
+                    def.getId(), def.getDisplayName(), def.getType(), def.getState(), playerCount, def.isPublicAccess() ? "P blico" : "Privado")
             ), false);
         }
         return 1;
@@ -202,16 +197,16 @@ public class BigBangWorldCommand {
         src.sendSuccess(() -> Component.literal("§eTipo: §f" + def.getType()), false);
         src.sendSuccess(() -> Component.literal("§eEstado: §f" + def.getState()), false);
         src.sendSuccess(() -> Component.literal("§eSeed: §f" + def.getSeed()), false);
-        src.sendSuccess(() -> Component.literal("§eChave de Dimensão: §f" + def.getDimensionKey()), false);
-        src.sendSuccess(() -> Component.literal("§eAcesso: §f" + (def.isPublicAccess() ? "Público" : "Privado")), false);
+        src.sendSuccess(() -> Component.literal("§eChave de Dimens o: §f" + def.getDimensionKey()), false);
+        src.sendSuccess(() -> Component.literal("§eAcesso: §f" + (def.isPublicAccess() ? "P blico" : "Privado")), false);
         src.sendSuccess(() -> Component.literal("§eCriado em: §f" + def.getCreatedAt()), false);
-        src.sendSuccess(() -> Component.literal("§eÚltimo Reset: §f" + (def.getLastResetAt() == null ? "Nunca" : def.getLastResetAt())), false);
+        src.sendSuccess(() -> Component.literal("§e ltimo Reset: §f" + (def.getLastResetAt() == null ? "Nunca" : def.getLastResetAt())), false);
         src.sendSuccess(() -> Component.literal("§eContador de Resets: §f" + def.getResetCount()), false);
         src.sendSuccess(() -> Component.literal(String.format("§eSpawn: §fX=%.1f, Y=%.1f, Z=%.1f", def.getSpawn().getX(), def.getSpawn().getY(), def.getSpawn().getZ())), false);
         src.sendSuccess(() -> Component.literal("§eBorda Ativa: §f" + (def.getBorder().isEnabled() ? def.getBorder().getDiameter() + " blocos" : "Desativada")), false);
-        
+
         WorldPolicies pol = def.getPolicies();
-        src.sendSuccess(() -> Component.literal(String.format("§ePolíticas: §7[Home=%b, Waystone=%b, Claim=%b, ChunkLoad=%b]", 
+        src.sendSuccess(() -> Component.literal(String.format("§ePol ticas: §7[Home=%b, Waystone=%b, Claim=%b, ChunkLoad=%b]",
             pol.isAllowHomeCreation(), pol.isAllowWaystones(), pol.isAllowClaims(), pol.isAllowChunkLoading())), false);
 
         return 1;
@@ -222,6 +217,11 @@ public class BigBangWorldCommand {
         WorldDefinition def = WorldManager.getInstance().getWorld(id);
         if (def == null) {
             src.sendFailure(TranslationUtil.getComponent("bigbangworld.message.world_not_found", id));
+            return 0;
+        }
+
+        if (def.isPendingOperation()) {
+            src.sendFailure(Component.literal("§cWorld pending operation. Restart required."));
             return 0;
         }
 
@@ -271,7 +271,6 @@ public class BigBangWorldCommand {
     }
 
     private static int executeAccess(CommandContext<CommandSourceStack> ctx, String id, boolean publicAccess) {
-        CommandSourceStack src = ctx.getSource();
         ServerPlayer player = adminOrNull(ctx);
         if (player != null && !PermissionService.hasPermission(player, "bigbangworld.configure") && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
@@ -283,7 +282,6 @@ public class BigBangWorldCommand {
     }
 
     private static int executeBorder(CommandContext<CommandSourceStack> ctx, String id, String diameter) {
-        CommandSourceStack src = ctx.getSource();
         ServerPlayer player = adminOrNull(ctx);
         if (player != null && !PermissionService.hasPermission(player, "bigbangworld.configure") && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
@@ -295,7 +293,6 @@ public class BigBangWorldCommand {
     }
 
     private static int executeEnable(CommandContext<CommandSourceStack> ctx, String id) {
-        CommandSourceStack src = ctx.getSource();
         ServerPlayer player = adminOrNull(ctx);
         if (player != null && !PermissionService.hasPermission(player, "bigbangworld.configure") && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
@@ -307,7 +304,6 @@ public class BigBangWorldCommand {
     }
 
     private static int executeDisable(CommandContext<CommandSourceStack> ctx, String id) {
-        CommandSourceStack src = ctx.getSource();
         ServerPlayer player = adminOrNull(ctx);
         if (player != null && !PermissionService.hasPermission(player, "bigbangworld.configure") && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
@@ -330,39 +326,29 @@ public class BigBangWorldCommand {
             return 0;
         }
 
-        if (argsStr == null || argsStr.isBlank()) {
-            WorldManager.getInstance().startResetFlow(id, "same-seed", null, player);
-            return 1;
-        }
-
-        String[] parts = argsStr.split("\\s+");
-        boolean confirm = false;
         String seedOption = "same-seed";
         String seedValue = null;
 
-        for (int i = 0; i < parts.length; i++) {
-            if ("--confirm".equals(parts[i])) {
-                confirm = true;
-            } else if ("random-seed".equals(parts[i])) {
-                seedOption = "random-seed";
-            } else if ("same-seed".equals(parts[i])) {
-                seedOption = "same-seed";
-            } else if ("seed".equals(parts[i]) && i + 1 < parts.length) {
-                seedOption = "seed";
-                seedValue = parts[i + 1];
-                i++;
+        if (argsStr != null && !argsStr.isBlank()) {
+            String[] parts = argsStr.split("\\s+");
+            for (int i = 0; i < parts.length; i++) {
+                if ("random-seed".equals(parts[i])) {
+                    seedOption = "random-seed";
+                } else if ("same-seed".equals(parts[i])) {
+                    seedOption = "same-seed";
+                } else if ("seed".equals(parts[i]) && i + 1 < parts.length) {
+                    seedOption = "seed";
+                    seedValue = parts[i + 1];
+                    i++;
+                }
             }
         }
 
-        if (confirm) {
-            WorldManager.getInstance().confirmAction(player);
-        } else {
-            WorldManager.getInstance().startResetFlow(id, seedOption, seedValue, player);
-        }
+        WorldManager.getInstance().startResetFlow(id, seedOption, seedValue, player);
         return 1;
     }
 
-    private static int executeDelete(CommandContext<CommandSourceStack> ctx, String id, String confirmStr) {
+    private static int executeDelete(CommandContext<CommandSourceStack> ctx, String id) {
         ServerPlayer player = adminOrNull(ctx);
         if (player == null) {
             ctx.getSource().sendFailure(Component.literal("Apenas jogadores podem excluir mundos."));
@@ -374,11 +360,7 @@ public class BigBangWorldCommand {
             return 0;
         }
 
-        if ("--confirm".equals(confirmStr)) {
-            WorldManager.getInstance().confirmAction(player);
-        } else {
-            WorldManager.getInstance().startDeleteFlow(id, player);
-        }
+        WorldManager.getInstance().startDeleteFlow(id, player);
         return 1;
     }
 
@@ -400,21 +382,21 @@ public class BigBangWorldCommand {
         ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, resLoc);
         ServerLevel level = src.getServer().getLevel(key);
 
-        src.sendSuccess(() -> Component.literal("§6=== Diagnóstico do Mundo: " + id + " ==="), false);
+        src.sendSuccess(() -> Component.literal("§6=== Diagn stico do Mundo: " + id + " ==="), false);
         src.sendSuccess(() -> Component.literal("§eTipo de Mundo: §f" + def.getType()), false);
-        src.sendSuccess(() -> Component.literal("§eChave de Dimensão: §f" + def.getDimensionKey()), false);
+        src.sendSuccess(() -> Component.literal("§eChave de Dimens o: §f" + def.getDimensionKey()), false);
         src.sendSuccess(() -> Component.literal("§eEstado: §f" + def.getState()), false);
         src.sendSuccess(() -> Component.literal("§eSeed: §f" + def.getSeed()), false);
-        src.sendSuccess(() -> Component.literal("§eAcesso: §f" + (def.isPublicAccess() ? "Público" : "Privado")), false);
+        src.sendSuccess(() -> Component.literal("§eAcesso: §f" + (def.isPublicAccess() ? "P blico" : "Privado")), false);
         src.sendSuccess(() -> Component.literal(String.format("§eSpawn: §fX=%.1f, Y=%.1f, Z=%.1f", def.getSpawn().getX(), def.getSpawn().getY(), def.getSpawn().getZ())), false);
-        src.sendSuccess(() -> Component.literal("§eÚltimo Reset: §f" + (def.getLastResetAt() == null ? "Nunca" : def.getLastResetAt())), false);
+        src.sendSuccess(() -> Component.literal("§e ltimo Reset: §f" + (def.getLastResetAt() == null ? "Nunca" : def.getLastResetAt())), false);
         src.sendSuccess(() -> Component.literal("§eContador de Resets: §f" + def.getResetCount()), false);
 
         if (level != null) {
             ChunkGenerator generator = level.getChunkSource().getGenerator();
             src.sendSuccess(() -> Component.literal("§eGerador Utilizado: §a" + generator.getClass().getSimpleName()), false);
             src.sendSuccess(() -> Component.literal("§eBiome Source: §a" + generator.getBiomeSource().getClass().getSimpleName()), false);
-            
+
             int structuresCount = level.registryAccess().registryOrThrow(Registries.STRUCTURE).size();
             int structureSetsCount = level.registryAccess().registryOrThrow(Registries.STRUCTURE_SET).size();
             src.sendSuccess(() -> Component.literal("§eEstruturas no Registry: §a" + structuresCount), false);
@@ -424,22 +406,17 @@ public class BigBangWorldCommand {
         }
 
         boolean hasCobblemon = BuiltInRegistries.ENTITY_TYPE.containsKey(ResourceLocation.fromNamespaceAndPath("cobblemon", "pokemon"));
-        boolean hasCobblemonExtra = false;
-        try {
-            hasCobblemonExtra = com.pedrodalben.bigbangworld.util.Platform.isModLoaded("cobblemon_extra_structures") ||
-                com.pedrodalben.bigbangworld.util.Platform.isModLoaded("cobblemon-extra-structures");
-        } catch (Exception ignored) {}
         boolean hasWaystones = BuiltInRegistries.BLOCK.containsKey(ResourceLocation.fromNamespaceAndPath("waystones", "waystone"));
 
-        src.sendSuccess(() -> Component.literal("§ePresença de Cobblemon: " + (hasCobblemon ? "§aSim" : "§cNão")), false);
-        src.sendSuccess(() -> Component.literal("§ePresença de Waystones: " + (hasWaystones ? "§aSim" : "§cNão")), false);
+        src.sendSuccess(() -> Component.literal("§ePresen a de Cobblemon: " + (hasCobblemon ? "§aSim" : "§cN o")), false);
+        src.sendSuccess(() -> Component.literal("§ePresen a de Waystones: " + (hasWaystones ? "§aSim" : "§cN o")), false);
 
         if (hasCobblemon) {
-            src.sendSuccess(() -> Component.literal("§aCobblemon detectado. Estruturas serão geradas conforme as regras do mod."), false);
+            src.sendSuccess(() -> Component.literal("§aCobblemon detectado. Estruturas ser o geradas conforme as regras do mod."), false);
         }
-        
-        src.sendSuccess(() -> Component.literal(String.format("§ePolíticas Ativas: §7[Home=%b, Waystone=%b, Claim=%b, ChunkLoad=%b]", 
-            def.getPolicies().isAllowHomeCreation(), def.getPolicies().isAllowWaystones(), 
+
+        src.sendSuccess(() -> Component.literal(String.format("§ePol ticas Ativas: §7[Home=%b, Waystone=%b, Claim=%b, ChunkLoad=%b]",
+            def.getPolicies().isAllowHomeCreation(), def.getPolicies().isAllowWaystones(),
             def.getPolicies().isAllowClaims(), def.getPolicies().isAllowChunkLoading())), false);
 
         src.sendSuccess(() -> Component.literal("§eBorda Ativa: §f" + (def.getBorder().isEnabled() ? def.getBorder().getDiameter() + " blocos" : "Desativada")), false);
@@ -459,6 +436,11 @@ public class BigBangWorldCommand {
 
         if (def == null) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_exploration_world"));
+            return 0;
+        }
+
+        if (def.isPendingOperation()) {
+            player.sendSystemMessage(Component.literal("§cWorld pending restart."));
             return 0;
         }
 

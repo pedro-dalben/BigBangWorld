@@ -9,19 +9,20 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+
 public class WorldRestrictionService {
 
     private static boolean isWaystoneBlock(String blockIdStr, String namespace) {
-        return "waystones".equals(namespace) || 
-               "fwaystones".equals(namespace) || 
-               blockIdStr.contains("waystone") || 
-               blockIdStr.contains("sharestone") || 
-               blockIdStr.contains("portstone") || 
+        return "waystones".equals(namespace) ||
+               "fwaystones".equals(namespace) ||
+               blockIdStr.contains("waystone") ||
+               blockIdStr.contains("sharestone") ||
+               blockIdStr.contains("portstone") ||
                blockIdStr.contains("warp_plate");
     }
 
     public static boolean isPlacementBlocked(ServerPlayer player, BlockState state, ServerLevel level) {
-        if (player == null || state == null || level == null) {
+        if (state == null || level == null) {
             return false;
         }
 
@@ -38,7 +39,7 @@ public class WorldRestrictionService {
         String blockIdStr = blockId.toString();
         String namespace = blockId.getNamespace();
 
-        if (isWaystoneBlock(blockIdStr, namespace) && api.isWaystonePlacementAllowed(player, state)) {
+        if (player != null && isWaystoneBlock(blockIdStr, namespace) && api.isWaystonePlacementAllowed(player, state)) {
             return false;
         }
 
@@ -46,8 +47,10 @@ public class WorldRestrictionService {
         boolean blockRestricted = config.getRestrictedPlacementBlocks().contains(blockIdStr);
         boolean namespaceRestricted = config.getRestrictedPlacementNamespaces().contains(namespace);
 
-        if (blockRestricted || namespaceRestricted) {
-            player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.waystone_placement_blocked"));
+        if (blockRestricted || namespaceRestricted || isWaystoneBlock(blockIdStr, namespace)) {
+            if (player != null) {
+                player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.waystone_placement_blocked"));
+            }
             return true;
         }
 

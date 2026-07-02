@@ -1,10 +1,10 @@
 package com.pedrodalben.bigbangworld.domain;
 
 public enum WorldLifecycleState {
-    CREATING,
+    PENDING_CREATE,
     ACTIVE,
     DISABLED,
-    RESETTING,
-    DELETING,
+    PENDING_RESET,
+    PENDING_DELETE,
     FAILED
 }

@@ -27,7 +27,8 @@ public class BigBangWorld {
         public static void onServerStarting(MinecraftServer server) {
             LOGGER.info("⚙ Initializing BigBangWorld configuration...");
             ConfigManager.load();
-            
+            ConfigManager.save();
+
             LOGGER.info("⚙ Initializing WorldManager...");
             WorldManager.getInstance().init(server);
         }

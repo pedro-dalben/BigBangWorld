@@ -55,4 +55,14 @@ public class WorldDefinition {
 
     public WorldPolicies getPolicies() { return policies; }
     public void setPolicies(WorldPolicies policies) { this.policies = policies; }
+
+    public boolean isActive() {
+        return state == WorldLifecycleState.ACTIVE;
+    }
+
+    public boolean isPendingOperation() {
+        return state == WorldLifecycleState.PENDING_CREATE
+            || state == WorldLifecycleState.PENDING_RESET
+            || state == WorldLifecycleState.PENDING_DELETE;
+    }
 }
