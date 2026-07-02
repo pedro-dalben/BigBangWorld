@@ -29,12 +29,10 @@ public class NeoForgeEvents {
 
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            if (event.getLevel() instanceof ServerLevel level) {
-                if (WorldRestrictionService.isPlacementBlocked(player, event.getPlacedBlock(), level)) {
-                    event.setCanceled(true);
-                }
-            }
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        ServerPlayer player = event.getEntity() instanceof ServerPlayer sp ? sp : null;
+        if (WorldRestrictionService.isPlacementBlocked(player, event.getPlacedBlock(), level)) {
+            event.setCanceled(true);
         }
     }
 }

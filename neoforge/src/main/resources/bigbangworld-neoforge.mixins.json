@@ -1,12 +1,13 @@
 {
   "required": true,
-  "package": "com.pedrodalben.bigbangworld.neoforge.mixin",
+  "package": "com.pedrodalben.bigbangworld.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "MinecraftServerMixin"
+    "MinecraftServerBootstrapMixin"
   ],
   "client": [],
   "injectors": {
     "defaultRequire": 1
   }
 }
+
