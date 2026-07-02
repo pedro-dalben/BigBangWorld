@@ -1,6 +1,7 @@
 package com.pedrodalben.bigbangworld.fabric.mixin;
 
 import com.pedrodalben.bigbangworld.restriction.WorldRestrictionService;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.BlockItem;
@@ -13,12 +14,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(BlockItem.class)
 public class BlockItemMixin {
-    @Inject(method = "place", at = @At("HEAD"), cancellable = true)
+    @Inject(
+        method = "place(Lnet/minecraft/world/item/context/BlockPlaceContext;)Lnet/minecraft/world/InteractionResult;",
+        at = @At("HEAD"),
+        cancellable = true
+    )
     private void onPlace(BlockPlaceContext context, CallbackInfoReturnable<InteractionResult> cir) {
-        if (context.getPlayer() instanceof ServerPlayer player) {
+        if (context.getLevel() instanceof ServerLevel level) {
+            ServerPlayer player = (ServerPlayer) context.getPlayer();
             BlockItem item = (BlockItem) (Object) this;
             BlockState state = item.getBlock().defaultBlockState();
-            if (WorldRestrictionService.isPlacementBlocked(player, state, player.serverLevel())) {
+            if (WorldRestrictionService.isPlacementBlocked(player, state, level)) {
                 cir.setReturnValue(InteractionResult.FAIL);
             }
         }

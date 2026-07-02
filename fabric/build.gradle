@@ -2,6 +2,19 @@ plugins {
     id 'fabric-loom' version '1.9-SNAPSHOT'
 }
 
+sourceSets {
+    main {
+        java {
+            srcDirs += [project(":common").file("src/main/java")]
+        }
+        resources {
+            srcDirs += [project(":common").file("src/main/resources")]
+        }
+    }
+}
+
+
+
 base {
     archivesName = "${mod_id}-fabric"
 }
@@ -47,3 +60,10 @@ tasks.named('jar', Jar) {
     from project(":common").sourceSets.main.output
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
+
+loom {
+    mixin {
+        defaultRefmapName = "bigbangworld-fabric.refmap.json"
+    }
+}
+

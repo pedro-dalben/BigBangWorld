@@ -15,6 +15,7 @@
     ]
   },
   "mixins": [
+    "bigbangworld.mixins.json",
     "bigbangworld-fabric.mixins.json"
   ],
   "depends": {
