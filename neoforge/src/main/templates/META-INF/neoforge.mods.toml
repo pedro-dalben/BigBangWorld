@@ -12,6 +12,9 @@ description='''${mod_description}'''
 [[mixins]]
 config="bigbangworld.mixins.json"
 
+[[mixins]]
+config="bigbangworld-neoforge.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"

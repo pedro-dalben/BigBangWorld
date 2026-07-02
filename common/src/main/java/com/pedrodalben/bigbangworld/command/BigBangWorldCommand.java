@@ -30,7 +30,7 @@ public class BigBangWorldCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         // Register /bbworld
         dispatcher.register(Commands.literal("bbworld")
-            .requires(src -> src.hasPermission(4) || (src.isPlayer() && PermissionService.hasPermission(src.getPlayer(), "bigbangworld.admin")))
+            .requires(src -> src.hasPermission(4) || src.isPlayer())
             .then(Commands.literal("create")
                 .then(Commands.argument("id", StringArgumentType.word())
                     .then(Commands.argument("type", StringArgumentType.word())
@@ -154,6 +154,12 @@ public class BigBangWorldCommand {
 
     private static int executeList(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack src = ctx.getSource();
+        ServerPlayer player = src.getPlayer();
+        if (player != null && !PermissionService.hasPermission(player, "bigbangworld.teleport") && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
+            player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
+            return 0;
+        }
+
         Collection<WorldDefinition> list = WorldManager.getInstance().getAllWorlds();
 
         src.sendSuccess(() -> Component.literal("§6=== Mundos BigBangWorld (" + list.size() + ") ==="), false);
@@ -178,6 +184,12 @@ public class BigBangWorldCommand {
 
     private static int executeInfo(CommandContext<CommandSourceStack> ctx, String id) {
         CommandSourceStack src = ctx.getSource();
+        ServerPlayer player = src.getPlayer();
+        if (player != null && !PermissionService.hasPermission(player, "bigbangworld.teleport") && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
+            player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
+            return 0;
+        }
+
         WorldDefinition def = WorldManager.getInstance().getWorld(id);
         if (def == null) {
             src.sendFailure(TranslationUtil.getComponent("bigbangworld.message.world_not_found", id));
@@ -218,14 +230,19 @@ public class BigBangWorldCommand {
             return 0;
         }
 
-        ServerPlayer playerToTeleport = target != null ? target : src.getPlayer();
-        if (playerToTeleport == null) {
-            src.sendFailure(Component.literal("Apenas jogadores podem ser teleportados."));
-            return 0;
+        ServerPlayer sender = src.getPlayer();
+        if (sender != null) {
+            boolean isSelf = (target == null || target == sender);
+            String perm = isSelf ? "bigbangworld.teleport" : "bigbangworld.teleport.other";
+            if (!PermissionService.hasPermission(sender, perm) && !PermissionService.hasPermission(sender, "bigbangworld.admin")) {
+                sender.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
+                return 0;
+            }
         }
 
-        if (playerToTeleport == src.getPlayer() && !PermissionService.hasPermission(playerToTeleport, "bigbangworld.teleport") && !PermissionService.hasPermission(playerToTeleport, "bigbangworld.admin")) {
-            playerToTeleport.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
+        ServerPlayer playerToTeleport = target != null ? target : sender;
+        if (playerToTeleport == null) {
+            src.sendFailure(Component.literal("Apenas jogadores podem ser teleportados."));
             return 0;
         }
 
@@ -367,6 +384,12 @@ public class BigBangWorldCommand {
 
     private static int executeDiagnose(CommandContext<CommandSourceStack> ctx, String id) {
         CommandSourceStack src = ctx.getSource();
+        ServerPlayer player = src.getPlayer();
+        if (player != null && !PermissionService.hasPermission(player, "bigbangworld.admin")) {
+            player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.no_permission"));
+            return 0;
+        }
+
         WorldDefinition def = WorldManager.getInstance().getWorld(id);
         if (def == null) {
             src.sendFailure(TranslationUtil.getComponent("bigbangworld.message.world_not_found", id));

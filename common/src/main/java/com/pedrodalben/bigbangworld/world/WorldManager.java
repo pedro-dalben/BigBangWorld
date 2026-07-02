@@ -5,7 +5,8 @@ import com.pedrodalben.bigbangworld.api.WorldPolicyApi;
 import com.pedrodalben.bigbangworld.config.Config;
 import com.pedrodalben.bigbangworld.config.ConfigManager;
 import com.pedrodalben.bigbangworld.domain.*;
-import com.pedrodalben.bigbangworld.mixin.MinecraftServerAccessor;
+import com.pedrodalben.bigbangworld.accessor.MinecraftServerAccessor;
+import com.pedrodalben.bigbangworld.util.ThreadCheck;
 import com.pedrodalben.bigbangworld.util.TranslationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -110,6 +111,10 @@ public class WorldManager implements WorldPolicyApi {
         }, 30, 30, TimeUnit.SECONDS);
     }
 
+    private void requireServerThread(String operation) {
+        ThreadCheck.requireServerThread(server, operation);
+    }
+
     public void loadWorldsFromConfig() {
         worlds.clear();
         Config config = ConfigManager.getConfig();
@@ -124,14 +129,20 @@ public class WorldManager implements WorldPolicyApi {
                     def.setState(WorldLifecycleState.FAILED);
                     ConfigManager.save();
                 }
+            } else if (def.getState() == WorldLifecycleState.CREATING) {
+                recoverInterruptedCreation(def);
             }
         }
     }
 
-    public ServerLevel loadOrCreateWorld(WorldDefinition def) {
-        String id = def.getId();
-        ResourceLocation resLoc = ResourceLocation.fromNamespaceAndPath("bigbangworld", id);
-        ResourceKey<Level> dimensionKey = ResourceKey.create(Registries.DIMENSION, resLoc);
+    private ResourceKey<Level> getDimensionKey(WorldDefinition def) {
+        ResourceLocation resLoc = ResourceLocation.fromNamespaceAndPath("bigbangworld", def.getId());
+        return ResourceKey.create(Registries.DIMENSION, resLoc);
+    }
+
+    private ServerLevel createServerLevel(WorldDefinition def) {
+        requireServerThread("WorldManager.createServerLevel");
+        ResourceKey<Level> dimensionKey = getDimensionKey(def);
 
         if (server.getLevel(dimensionKey) != null) {
             return server.getLevel(dimensionKey);
@@ -225,7 +236,7 @@ public class WorldManager implements WorldPolicyApi {
             @Override public void stop() {}
         };
 
-        ServerLevel level = new ServerLevel(
+        return new ServerLevel(
                 server,
                 server,
                 ((MinecraftServerAccessor) server).getStorageSource(),
@@ -239,6 +250,11 @@ public class WorldManager implements WorldPolicyApi {
                 true,
                 null
         );
+    }
+
+    private void registerWorldLevel(WorldDefinition def, ServerLevel level) {
+        requireServerThread("WorldManager.registerWorldLevel");
+        ResourceKey<Level> dimensionKey = getDimensionKey(def);
 
         if (def.getBorder() != null && def.getBorder().isEnabled()) {
             level.getWorldBorder().setSize(def.getBorder().getDiameter());
@@ -247,16 +263,79 @@ public class WorldManager implements WorldPolicyApi {
         Map<ResourceKey<Level>, ServerLevel> levelsMap = ((MinecraftServerAccessor) server).getLevels();
         levelsMap.put(dimensionKey, level);
 
-        // Post NeoForge event if available
         postNeoForgeLoadEvent(level);
+    }
 
+    public ServerLevel loadOrCreateWorld(WorldDefinition def) {
+        requireServerThread("WorldManager.loadOrCreateWorld");
+        ServerLevel level = createServerLevel(def);
+        registerWorldLevel(def, level);
         return level;
     }
 
+    private void recoverInterruptedCreation(WorldDefinition def) {
+        ResourceKey<Level> dimensionKey = getDimensionKey(def);
+        Path dimensionPath = ((MinecraftServerAccessor) server).getStorageSource().getDimensionPath(dimensionKey);
+        LOGGER.warn("[BigBangWorld] World '{}' was left in CREATING state after a crash. Dimension path: {} (exists={}). Marking as FAILED for manual recovery.", def.getId(), dimensionPath, Files.exists(dimensionPath));
+        def.setState(WorldLifecycleState.FAILED);
+        ConfigManager.save();
+    }
+
+    private CompletableFuture<Void> prepareSpawnAsync(ServerLevel level, WorldDefinition def, WorldType type) {
+        requireServerThread("WorldManager.prepareSpawnAsync");
+        ChunkPos spawnChunk = new ChunkPos(0, 0);
+        return level.getChunkSource().getChunkFuture(spawnChunk.x, spawnChunk.z, ChunkStatus.FULL, true)
+                .thenAcceptAsync(result -> {
+                    if (!result.isSuccess()) {
+                        throw new IllegalStateException("Spawn chunk preparation failed for world '" + def.getId() + "': " + result.getError());
+                    }
+
+                    if (type == WorldType.VOID) {
+                        generateVoidPlatform(level, def);
+                        BlockPos spawnPos = new BlockPos((int) def.getSpawn().getX(), (int) def.getSpawn().getY(), (int) def.getSpawn().getZ());
+                        level.setDefaultSpawnPos(spawnPos, def.getSpawn().getYaw());
+                        return;
+                    }
+
+                    BlockPos startPos = new BlockPos(0, 96, 0);
+                    BlockPos safeSpawn = findSafeSpawnPosition(level, startPos);
+                    BlockPos spawnPos = safeSpawn != null ? safeSpawn : createSafetyPlatform(level, startPos);
+                    def.getSpawn().setX(spawnPos.getX() + 0.5);
+                    def.getSpawn().setY(spawnPos.getY());
+                    def.getSpawn().setZ(spawnPos.getZ() + 0.5);
+                    level.setDefaultSpawnPos(spawnPos, 0.0f);
+                }, server);
+    }
+
+    private void failWorldCreation(WorldDefinition def, ServerPlayer actor, String context, Throwable error) {
+        requireServerThread("WorldManager.failWorldCreation");
+        LOGGER.error("[BigBangWorld] {} for world '{}'", context, def.getId(), error);
+
+        ResourceKey<Level> dimensionKey = getDimensionKey(def);
+        ServerLevel existing = server.getLevel(dimensionKey);
+        if (existing != null) {
+            ((MinecraftServerAccessor) server).getLevels().remove(dimensionKey);
+            try {
+                existing.close();
+            } catch (Exception closeError) {
+                LOGGER.warn("[BigBangWorld] Failed to close partial world '{}' after creation failure", def.getId(), closeError);
+            }
+        }
+
+        def.setState(WorldLifecycleState.FAILED);
+        ConfigManager.save();
+        if (actor != null) {
+            actor.sendSystemMessage(Component.literal("§cErro crítico ao criar o mundo. Detalhes no console."));
+        }
+    }
+
     public void generateVoidPlatform(ServerLevel level, WorldDefinition def) {
+        requireServerThread("WorldManager.generateVoidPlatform");
         int spawnX = (int) def.getSpawn().getX();
         int spawnY = (int) def.getSpawn().getY() - 1;
         int spawnZ = (int) def.getSpawn().getZ();
+
+        ensureChunkLoadedForSpawn(level, new BlockPos(spawnX, spawnY, spawnZ));
 
         Block baseBlock = Blocks.STONE;
         String materialStr = ConfigManager.getConfig().getVoidPlatformMaterial();
@@ -291,11 +370,11 @@ public class WorldManager implements WorldPolicyApi {
             Object eventBus = neoforgeClass.getField("EVENT_BUS").get(null);
             eventBus.getClass().getMethod("post", Object.class).invoke(eventBus, event);
         } catch (Throwable ignored) {
-            // Not NeoForge or event post failed
         }
     }
 
     public boolean createWorld(String id, WorldType type, String seedInput, ServerPlayer creator) {
+        requireServerThread("WorldManager.createWorld");
         if (!validateId(id)) {
             creator.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.invalid_world_id"));
             return false;
@@ -344,50 +423,31 @@ public class WorldManager implements WorldPolicyApi {
         ConfigManager.getConfig().getWorlds().add(def);
 
         long startTime = System.currentTimeMillis();
+        long finalSeed = seed;
+
         try {
-            ServerLevel level = loadOrCreateWorld(def);
+            ServerLevel level = createServerLevel(def);
+            registerWorldLevel(def, level);
 
-            if (type == WorldType.VOID) {
-                generateVoidPlatform(level, def);
-            }
-
-            // Safe spawn search for NORMAL/SUPERFLAT
-            if (type != WorldType.VOID) {
-                BlockPos startPos = new BlockPos(0, 96, 0);
-                BlockPos safeSpawn = findSafeSpawnPosition(level, startPos);
-                if (safeSpawn != null) {
-                    def.getSpawn().setX(safeSpawn.getX() + 0.5);
-                    def.getSpawn().setY(safeSpawn.getY());
-                    def.getSpawn().setZ(safeSpawn.getZ() + 0.5);
-                    level.setDefaultSpawnPos(safeSpawn, 0.0f);
-                } else {
-                    // Create fallback platform
-                    BlockPos fallbackSpawn = createSafetyPlatform(level, startPos);
-                    def.getSpawn().setX(fallbackSpawn.getX() + 0.5);
-                    def.getSpawn().setY(fallbackSpawn.getY());
-                    def.getSpawn().setZ(fallbackSpawn.getZ() + 0.5);
-                    level.setDefaultSpawnPos(fallbackSpawn, 0.0f);
+            prepareSpawnAsync(level, def, type).whenCompleteAsync((ignored, spawnThrowable) -> {
+                if (spawnThrowable != null) {
+                    failWorldCreation(def, creator, "failed to prepare spawn chunk", spawnThrowable);
+                    return;
                 }
-            }
 
-            def.setState(WorldLifecycleState.ACTIVE);
-            ConfigManager.save();
+                def.setState(WorldLifecycleState.ACTIVE);
+                ConfigManager.save();
 
-            long duration = System.currentTimeMillis() - startTime;
-            creator.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.world_created", id));
-            LOGGER.info("[BigBangWorld] World '{}' created successfully in {}ms by {}. Seed: {}", id, duration, creator.getName().getString(), seed);
-
-            // Teleport creator
-            teleportPlayerToWorld(creator, def);
-            return true;
-
+                long duration = System.currentTimeMillis() - startTime;
+                creator.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.world_created", id));
+                LOGGER.info("[BigBangWorld] World '{}' created successfully in {}ms by {}. Seed: {}", id, duration, creator.getName().getString(), finalSeed);
+                teleportPlayerToWorld(creator, def);
+            }, server);
         } catch (Exception e) {
-            LOGGER.error("Failed to create dynamic world '{}'", id, e);
-            def.setState(WorldLifecycleState.FAILED);
-            ConfigManager.save();
-            creator.sendSystemMessage(Component.literal("§cErro crítico ao criar o mundo. Detalhes no console."));
+            failWorldCreation(def, creator, "failed to construct ServerLevel", e);
             return false;
         }
+        return true;
     }
 
     public boolean validateId(String id) {
@@ -403,13 +463,12 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public boolean teleportPlayerToWorld(ServerPlayer player, WorldDefinition def) {
-        // State check must be the first guard
+        requireServerThread("WorldManager.teleportPlayerToWorld");
         if (def.getState() != WorldLifecycleState.ACTIVE) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.cannot_teleport_unavailable", def.getId()));
             return false;
         }
 
-        // Check private access
         if (!def.isPublicAccess()) {
             String perm = "bigbangworld.access." + def.getId();
             boolean allowed = false;
@@ -439,6 +498,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public boolean setSpawn(String id, ServerPlayer player) {
+        requireServerThread("WorldManager.setSpawn");
         WorldDefinition def = worlds.get(id);
         if (def == null) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.world_not_found", id));
@@ -452,7 +512,6 @@ public class WorldManager implements WorldPolicyApi {
             return false;
         }
 
-        // Validate safe position
         BlockPos pos = player.blockPosition();
         if (pos.getY() < player.level().getMinBuildHeight() || pos.getY() > player.level().getMaxBuildHeight() - 2) {
             player.sendSystemMessage(TranslationUtil.getComponent("bigbangworld.message.spawn_not_safe"));
@@ -499,6 +558,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public void setAccess(String id, boolean publicAccess, ServerPlayer admin) {
+        requireServerThread("WorldManager.setAccess");
         WorldDefinition def = worlds.get(id);
         if (def == null) {
             sendMessage(admin, "bigbangworld.message.world_not_found", id);
@@ -510,6 +570,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public void setBorder(String id, String diameterInput, ServerPlayer admin) {
+        requireServerThread("WorldManager.setBorder");
         WorldDefinition def = worlds.get(id);
         if (def == null) {
             sendMessage(admin, "bigbangworld.message.world_not_found", id);
@@ -548,6 +609,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public void enableWorld(String id, ServerPlayer admin) {
+        requireServerThread("WorldManager.enableWorld");
         WorldDefinition def = worlds.get(id);
         if (def == null) {
             sendMessage(admin, "bigbangworld.message.world_not_found", id);
@@ -571,6 +633,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public void disableWorld(String id, ServerPlayer admin) {
+        requireServerThread("WorldManager.disableWorld");
         WorldDefinition def = worlds.get(id);
         if (def == null) {
             sendMessage(admin, "bigbangworld.message.world_not_found", id);
@@ -595,14 +658,14 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     private boolean unloadWorld(WorldDefinition def) {
+        requireServerThread("WorldManager.unloadWorld");
         ResourceLocation resLoc = ResourceLocation.fromNamespaceAndPath("bigbangworld", def.getId());
         ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, resLoc);
         ServerLevel targetLevel = server.getLevel(key);
         if (targetLevel == null) {
-            return true; // already unloaded
+            return true;
         }
 
-        // Teleport players to fallback
         ResourceLocation fallbackLoc = ResourceLocation.tryParse(ConfigManager.getConfig().getFallbackDimension());
         ResourceKey<Level> fallbackKey = fallbackLoc != null ? ResourceKey.create(Registries.DIMENSION, fallbackLoc) : Level.OVERWORLD;
         ServerLevel fallbackLevel = server.getLevel(fallbackKey);
@@ -618,11 +681,9 @@ public class WorldManager implements WorldPolicyApi {
         }
 
         try {
-            // Save and close target level
             targetLevel.save(null, true, false);
             targetLevel.close();
 
-            // Remove from levels map
             Map<ResourceKey<Level>, ServerLevel> levelsMap = ((MinecraftServerAccessor) server).getLevels();
             levelsMap.remove(key);
             return true;
@@ -633,9 +694,15 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public void startResetFlow(String id, String seedOption, String seedValue, ServerPlayer admin) {
+        requireServerThread("WorldManager.startResetFlow");
         WorldDefinition def = worlds.get(id);
         if (def == null) {
             sendMessage(admin, "bigbangworld.message.world_not_found", id);
+            return;
+        }
+
+        if (def.getState() != WorldLifecycleState.ACTIVE) {
+            sendMessage(admin, "bigbangworld.message.cannot_teleport_unavailable", id);
             return;
         }
 
@@ -650,8 +717,15 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public void startDeleteFlow(String id, ServerPlayer admin) {
-        if (!worlds.containsKey(id)) {
+        requireServerThread("WorldManager.startDeleteFlow");
+        WorldDefinition def = worlds.get(id);
+        if (def == null) {
             sendMessage(admin, "bigbangworld.message.world_not_found", id);
+            return;
+        }
+
+        if (def.getState() != WorldLifecycleState.ACTIVE) {
+            sendMessage(admin, "bigbangworld.message.cannot_teleport_unavailable", id);
             return;
         }
 
@@ -666,9 +740,16 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public boolean confirmAction(ServerPlayer admin) {
+        requireServerThread("WorldManager.confirmAction");
         PendingConfirmation conf = pendingConfirmations.remove(admin.getUUID());
         if (conf == null || (System.currentTimeMillis() - conf.timestamp) > CONFIRMATION_TIMEOUT_MS) {
             sendLiteral(admin, "§cConfirmação expirada ou inexistente.");
+            return false;
+        }
+
+        WorldDefinition def = worlds.get(conf.worldId);
+        if (def == null || def.getState() != WorldLifecycleState.ACTIVE) {
+            sendLiteral(admin, "§cEste mundo não está em estado ativo para esta operação.");
             return false;
         }
 
@@ -692,6 +773,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     private void executeReset(String id, String seedOption, String seedValue, ServerPlayer admin) {
+        requireServerThread("WorldManager.executeReset");
         WorldDefinition def = worlds.get(id);
         if (def == null) return;
 
@@ -700,39 +782,11 @@ public class WorldManager implements WorldPolicyApi {
         ConfigManager.save();
 
         long startTime = System.currentTimeMillis();
-        Path backupDir = null;
+
         try {
             boolean unloaded = unloadWorld(def);
             if (!unloaded) {
                 throw new IOException("Failed to unload level files.");
-            }
-
-            ResourceLocation resLoc = ResourceLocation.fromNamespaceAndPath("bigbangworld", id);
-            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, resLoc);
-            Path dimensionPath = ((MinecraftServerAccessor) server).getStorageSource().getDimensionPath(key);
-
-            if (Files.exists(dimensionPath)) {
-                if (ConfigManager.getConfig().isBackupBeforeReset()) {
-                    String timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss").withZone(java.time.ZoneId.systemDefault()).format(Instant.now());
-                    backupDir = Paths.get(((MinecraftServerAccessor) server).getStorageSource().getWorldDir().toString(), "bigbangworld-backups", id, timestamp);
-                    Files.createDirectories(backupDir);
-
-                    try {
-                        Files.move(dimensionPath, backupDir.resolve("region"), StandardCopyOption.REPLACE_EXISTING);
-                        LOGGER.info("[BigBangWorld] Backed up '{}' to '{}'", id, backupDir);
-                    } catch (IOException e) {
-                        LOGGER.warn("Failed to backup by move, attempting copy & delete.", e);
-                        if (!backupDir.resolve("region").toFile().exists()) {
-                            Files.createDirectories(backupDir.resolve("region"));
-                        }
-                        copyDirectory(dimensionPath, backupDir);
-                        deleteDirectorySync(dimensionPath);
-                    }
-
-                    asyncExecutor.execute(() -> cleanupBackups(id));
-                } else {
-                    deleteDirectorySync(dimensionPath);
-                }
             }
 
             long seed = def.getSeed();
@@ -746,38 +800,73 @@ public class WorldManager implements WorldPolicyApi {
                 }
             }
             def.setSeed(seed);
-
-            ServerLevel level = loadOrCreateWorld(def);
-
-            if (def.getType() == WorldType.VOID) {
-                generateVoidPlatform(level, def);
-            }
-
-            if (def.getType() != WorldType.VOID) {
-                BlockPos startPos = new BlockPos(0, 96, 0);
-                BlockPos safeSpawn = findSafeSpawnPosition(level, startPos);
-                if (safeSpawn != null) {
-                    def.getSpawn().setX(safeSpawn.getX() + 0.5);
-                    def.getSpawn().setY(safeSpawn.getY());
-                    def.getSpawn().setZ(safeSpawn.getZ() + 0.5);
-                    level.setDefaultSpawnPos(safeSpawn, 0.0f);
-                } else {
-                    BlockPos fallbackSpawn = createSafetyPlatform(level, startPos);
-                    def.getSpawn().setX(fallbackSpawn.getX() + 0.5);
-                    def.getSpawn().setY(fallbackSpawn.getY());
-                    def.getSpawn().setZ(fallbackSpawn.getZ() + 0.5);
-                    level.setDefaultSpawnPos(fallbackSpawn, 0.0f);
-                }
-            }
-
-            def.setState(WorldLifecycleState.ACTIVE);
-            def.setLastResetAt(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
-            def.setResetCount(def.getResetCount() + 1);
+            long finalSeed = seed;
             ConfigManager.save();
 
-            long duration = System.currentTimeMillis() - startTime;
-            sendMessage(admin, "bigbangworld.message.world_reset_success", id);
-            LOGGER.info("[BigBangWorld] World '{}' reset successfully in {}ms by {}. New seed: {}", id, duration, admin.getName().getString(), seed);
+            ResourceLocation resLoc = ResourceLocation.fromNamespaceAndPath("bigbangworld", id);
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, resLoc);
+            Path dimensionPath = ((MinecraftServerAccessor) server).getStorageSource().getDimensionPath(key);
+            Path worldDir = ((MinecraftServerAccessor) server).getStorageSource().getWorldDir();
+            boolean backupEnabled = ConfigManager.getConfig().isBackupBeforeReset();
+
+            CompletableFuture<Void> fileOpsFuture;
+            if (Files.exists(dimensionPath)) {
+                fileOpsFuture = CompletableFuture.runAsync(() -> {
+                    try {
+                        if (backupEnabled) {
+                            String timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
+                                .withZone(java.time.ZoneId.systemDefault()).format(Instant.now());
+                            Path backupDir = Paths.get(worldDir.toString(), "bigbangworld-backups", id, timestamp);
+                            Files.createDirectories(backupDir.getParent());
+                            Files.move(dimensionPath, backupDir, StandardCopyOption.REPLACE_EXISTING);
+                            LOGGER.info("[BigBangWorld] Backed up '{}' to '{}'", id, backupDir);
+                            cleanupBackups(Paths.get(worldDir.toString(), "bigbangworld-backups", id));
+                        } else {
+                            deleteDirectorySync(dimensionPath);
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to backup/delete world files", e);
+                    }
+                }, asyncExecutor);
+            } else {
+                fileOpsFuture = CompletableFuture.completedFuture(null);
+            }
+
+            fileOpsFuture.whenCompleteAsync((ignored, fileThrowable) -> {
+                if (fileThrowable != null) {
+                    LOGGER.error("[BigBangWorld] Failed to backup/delete world files for '{}'", id, fileThrowable);
+                    def.setState(WorldLifecycleState.FAILED);
+                    ConfigManager.save();
+                    sendMessage(admin, "bigbangworld.message.world_reset_failed", id);
+                    return;
+                }
+
+                try {
+                    ServerLevel level = createServerLevel(def);
+                    registerWorldLevel(def, level);
+
+                    prepareSpawnAsync(level, def, def.getType()).whenCompleteAsync((ignored2, spawnThrowable) -> {
+                        if (spawnThrowable != null) {
+                            failWorldCreation(def, admin, "failed to prepare spawn chunk during reset", spawnThrowable);
+                            sendMessage(admin, "bigbangworld.message.world_reset_failed", id);
+                            return;
+                        }
+
+                        def.setState(WorldLifecycleState.ACTIVE);
+                        def.setLastResetAt(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+                        def.setResetCount(def.getResetCount() + 1);
+                        ConfigManager.save();
+
+                        long duration = System.currentTimeMillis() - startTime;
+                        sendMessage(admin, "bigbangworld.message.world_reset_success", id);
+                        LOGGER.info("[BigBangWorld] World '{}' reset successfully in {}ms by {}. New seed: {}", id, duration, admin.getName().getString(), finalSeed);
+                    }, server);
+                } catch (Exception e) {
+                    failWorldCreation(def, admin, "failed to reconstruct ServerLevel during reset", e);
+                    sendMessage(admin, "bigbangworld.message.world_reset_failed", id);
+                }
+            }, server);
+            return;
 
         } catch (Exception e) {
             LOGGER.error("Failed to reset dynamic world '{}'", id, e);
@@ -788,6 +877,7 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     private void executeDelete(String id, ServerPlayer admin) {
+        requireServerThread("WorldManager.executeDelete");
         WorldDefinition def = worlds.get(id);
         if (def == null) return;
 
@@ -833,9 +923,8 @@ public class WorldManager implements WorldPolicyApi {
         }
     }
 
-    private void cleanupBackups(String id) {
+    private void cleanupBackups(Path backupsRoot) {
         try {
-            Path backupsRoot = Paths.get(((MinecraftServerAccessor) server).getStorageSource().getWorldDir().toString(), "bigbangworld-backups", id);
             if (!Files.exists(backupsRoot)) return;
 
             File[] files = backupsRoot.toFile().listFiles(File::isDirectory);
@@ -855,7 +944,7 @@ public class WorldManager implements WorldPolicyApi {
                 }
             }
         } catch (Exception e) {
-            LOGGER.error("Failed to cleanup old backups for world '{}'", id, e);
+            LOGGER.error("[BigBangWorld] Failed to cleanup old backups", e);
         }
     }
 
@@ -882,8 +971,19 @@ public class WorldManager implements WorldPolicyApi {
         });
     }
 
-    // Spawn searching helper logic
+    private void ensureChunkLoadedForSpawn(ServerLevel level, BlockPos pos) {
+        requireServerThread("WorldManager.ensureChunkLoadedForSpawn");
+        if (!level.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+            throw new IllegalStateException("Spawn chunk is not loaded yet at " + pos);
+        }
+    }
+
     private boolean isSafeBlock(ServerLevel level, BlockPos pos) {
+        requireServerThread("WorldManager.isSafeBlock");
+        if (!level.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+            return false;
+        }
+
         BlockState floor = level.getBlockState(pos.below());
         BlockState body = level.getBlockState(pos);
         BlockState head = level.getBlockState(pos.above());
@@ -899,13 +999,18 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public BlockPos findSafeSpawnPosition(ServerLevel level, BlockPos startPos) {
-        int searchRadius = 50;
+        requireServerThread("WorldManager.findSafeSpawnPosition");
+        int searchRadius = 8;
         for (int r = 0; r < searchRadius; r++) {
             for (int x = -r; x <= r; x++) {
                 for (int z = -r; z <= r; z++) {
                     if (Math.abs(x) == r || Math.abs(z) == r) {
                         int targetX = startPos.getX() + x;
                         int targetZ = startPos.getZ() + z;
+
+                        if (!level.getChunkSource().hasChunk(targetX >> 4, targetZ >> 4)) {
+                            continue;
+                        }
 
                         int highestY = level.getHeight(Heightmap.Types.MOTION_BLOCKING, targetX, targetZ);
                         for (int y = highestY + 5; y >= highestY - 20; y--) {
@@ -922,8 +1027,11 @@ public class WorldManager implements WorldPolicyApi {
     }
 
     public BlockPos createSafetyPlatform(ServerLevel level, BlockPos pos) {
+        requireServerThread("WorldManager.createSafetyPlatform");
+        ensureChunkLoadedForSpawn(level, pos);
+
         int startX = pos.getX();
-        int startY = pos.getY() - 1; // underneath feet
+        int startY = pos.getY() - 1;
         int startZ = pos.getZ();
 
         for (int x = -1; x <= 1; x++) {
@@ -937,7 +1045,6 @@ public class WorldManager implements WorldPolicyApi {
         return pos;
     }
 
-    // WorldPolicyApi Implementation
     @Override
     public boolean isManagedWorld(ServerLevel level) {
         if (level == null) return false;
@@ -952,7 +1059,7 @@ public class WorldManager implements WorldPolicyApi {
         if (!"bigbangworld".equals(namespace)) return false;
         String id = level.dimension().location().getPath();
         WorldDefinition def = worlds.get(id);
-        return def != null; // Currently all managed worlds under this mod are temporary/resettable
+        return def != null;
     }
 
     @Override
@@ -1015,7 +1122,6 @@ public class WorldManager implements WorldPolicyApi {
         return true;
     }
 
-    // Helper classes for reset/delete confirmations
     private enum PendingAction {
         RESET, DELETE
     }

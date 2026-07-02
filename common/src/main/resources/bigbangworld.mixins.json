@@ -2,9 +2,7 @@
   "required": true,
   "package": "com.pedrodalben.bigbangworld.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [
-    "MinecraftServerAccessor"
-  ],
+  "mixins": [],
   "client": [],
   "injectors": {
     "defaultRequire": 1
