@@ -2,6 +2,8 @@
 
 BigBangWorld é um mod server-side de Minecraft que permite a criação, administração, teletransporte e reset de mundos adicionais/temporários em servidores modded.
 
+Documentação técnica da criação de dimensões e integrações de worldgen: [docs/WORLDGEN_INTEGRATION.md](docs/WORLDGEN_INTEGRATION.md).
+
 Este mod foi projetado especificamente para rodar com suporte multi-loader (**Fabric** e **NeoForge**) na versão **1.21.1**.
 
 ## Características principais

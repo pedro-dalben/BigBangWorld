@@ -18,6 +18,9 @@ Este documento descreve os casos de teste planejados para homologação do mod *
 | **CT-08** | Reset de Mundo (Com confirmação) | Executar `/bbworld reset teste_normal` e depois `/bbworld reset teste_normal --confirm` | Jogadores evacuados. O mundo é descarregado, a pasta é renomeada para backup instantaneamente, uma nova dimensão é gerada com o estado `ACTIVE`, spawn e plataformas gerados novamente. | **Aprovado** |
 | **CT-09** | Exclusão de Mundo (Assíncrona) | Executar `/bbworld delete teste_normal` e `/bbworld delete teste_normal --confirm` | Mundo descarregado, removido das configurações do mod, e os arquivos em disco apagados em segundo plano sem travar a thread de tick. | **Aprovado** |
 | **CT-10** | Diagnóstico de Mod | Executar `/bbworld diagnose exploracao` | Exibe resumo técnico do mundo, gerador utilizado, quantidade de estruturas registradas nos registries dinâmicos e status de integração (Cobblemon, Waystones). | **Aprovado** |
+| **CT-11** | Worldgen de Mods | Criar/resetar mundo `NORMAL` com Repurposed Structures e Legendary Monuments instalados; gerar chunks novos | O diagnóstico mostra worldgen NORMAL e `structure_sets` carregados; estruturas compatíveis podem ser localizadas nos chunks novos. | **Pendente em servidor modpack** |
+| **CT-12** | Integração Raid Dens | Iniciar com Cobblemon Raid Dens e uma dimensão `NORMAL` ativa | Log registra a integração e `/bbworld diagnose <id>` mostra Raid Dens habilitado; o arquivo `common.json5` original permanece inalterado. | **Pendente em servidor modpack** |
+| **CT-13** | Compatibilidade Opcional | Iniciar sem Repurposed Structures, Legendary Monuments ou Cobblemon Raid Dens | BigBangWorld inicia sem crash e o diagnóstico marca o mod ausente. | **Pendente em servidor modpack** |
 
 ---
 
