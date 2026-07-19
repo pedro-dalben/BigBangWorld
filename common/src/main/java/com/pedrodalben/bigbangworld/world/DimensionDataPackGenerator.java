@@ -11,13 +11,22 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.stream.Stream;
 
 public class DimensionDataPackGenerator {
     private static final Logger LOGGER = LoggerFactory.getLogger(DimensionDataPackGenerator.class);
 
     public static void generate(Path outputDir, Collection<WorldDefinition> activeWorlds) {
         try {
-            Files.createDirectories(outputDir.resolve("data/bigbangworld/dimension"));
+            Path dimensionsDir = outputDir.resolve("data/bigbangworld/dimension");
+            Files.createDirectories(dimensionsDir);
+
+            try (Stream<Path> files = Files.list(dimensionsDir)) {
+                for (Path file : files.filter(path -> Files.isRegularFile(path)
+                        && path.getFileName().toString().endsWith(".json")).toList()) {
+                    Files.deleteIfExists(file);
+                }
+            }
 
             for (WorldDefinition def : activeWorlds) {
                 generateDimensionJson(outputDir, def);

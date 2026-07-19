@@ -55,6 +55,7 @@ public class WorldBootstrap {
 
         Path dataPackDir = worldDir.resolve("datapacks/bigbangworld-dimensions");
         DimensionDataPackGenerator.generate(dataPackDir, activeWorlds);
+        WorldgenGateway.prepare(activeWorlds);
 
         LOGGER.info("[BigBangWorld] Bootstrap complete. {} worlds configured.", activeWorlds.size());
     }

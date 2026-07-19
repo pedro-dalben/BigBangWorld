@@ -2,6 +2,7 @@ package com.pedrodalben.bigbangworld;
 
 import com.pedrodalben.bigbangworld.config.ConfigManager;
 import com.pedrodalben.bigbangworld.world.WorldManager;
+import com.pedrodalben.bigbangworld.world.WorldgenGateway;
 import com.pedrodalben.bigbangworld.command.BigBangWorldCommand;
 import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.commands.CommandSourceStack;
@@ -31,6 +32,9 @@ public class BigBangWorld {
 
             LOGGER.info("⚙ Initializing WorldManager...");
             WorldManager.getInstance().init(server);
+            WorldgenGateway.prepare(ConfigManager.getConfig().getWorlds().stream()
+                    .filter(def -> def.isActive())
+                    .toList());
         }
 
         public static void onServerStopping(MinecraftServer server) {

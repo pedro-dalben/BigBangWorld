@@ -9,6 +9,7 @@ import com.pedrodalben.bigbangworld.domain.*;
 import com.pedrodalben.bigbangworld.util.PermissionService;
 import com.pedrodalben.bigbangworld.util.TranslationUtil;
 import com.pedrodalben.bigbangworld.world.WorldManager;
+import com.pedrodalben.bigbangworld.world.WorldgenGateway;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
@@ -391,6 +392,7 @@ public class BigBangWorldCommand {
         src.sendSuccess(() -> Component.literal(String.format("§eSpawn: §fX=%.1f, Y=%.1f, Z=%.1f", def.getSpawn().getX(), def.getSpawn().getY(), def.getSpawn().getZ())), false);
         src.sendSuccess(() -> Component.literal("§e ltimo Reset: §f" + (def.getLastResetAt() == null ? "Nunca" : def.getLastResetAt())), false);
         src.sendSuccess(() -> Component.literal("§eContador de Resets: §f" + def.getResetCount()), false);
+        src.sendSuccess(() -> Component.literal("§eWorldgen NORMAL: " + (WorldgenGateway.isNormal(def) ? "§aSim" : "§7N o")), false);
 
         if (level != null) {
             ChunkGenerator generator = level.getChunkSource().getGenerator();
@@ -410,6 +412,10 @@ public class BigBangWorldCommand {
 
         src.sendSuccess(() -> Component.literal("§ePresen a de Cobblemon: " + (hasCobblemon ? "§aSim" : "§cN o")), false);
         src.sendSuccess(() -> Component.literal("§ePresen a de Waystones: " + (hasWaystones ? "§aSim" : "§cN o")), false);
+        boolean raidDens = WorldgenGateway.isRaidDensEnabled(def);
+        src.sendSuccess(() -> Component.literal("§eCobblemon Raid Dens: " + (raidDens ? "§aHabilitado" : "§7N o habilitado")), false);
+        src.sendSuccess(() -> Component.literal("§eRepurposed Structures: " + (WorldgenGateway.isRepurposedStructuresLoaded() ? "§aPresente" : "§cAusente")), false);
+        src.sendSuccess(() -> Component.literal("§eLegendary Monuments: " + (WorldgenGateway.isLegendaryMonumentsLoaded() ? "§aPresente" : "§cAusente")), false);
 
         if (hasCobblemon) {
             src.sendSuccess(() -> Component.literal("§aCobblemon detectado. Estruturas ser o geradas conforme as regras do mod."), false);
